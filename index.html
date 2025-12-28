@@ -743,10 +743,84 @@
             updatePreview();
         }
 
+        // Extract repo URL from HTML
+        function extractRepoUrl(htmlContent) {
+            try {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlContent, 'text/html');
+                
+                // Try og:url meta tag
+                let meta = doc.querySelector('meta[property="og:url"]');
+                if (meta) {
+                    const url = meta.getAttribute('content');
+                    if (url && url.includes('github.com')) {
+                        const match = url.match(/https:\/\/github\.com\/[^\/]+\/[^\/]+/);
+                        if (match) return match[0];
+                    }
+                }
+                
+                // Try canonical link
+                meta = doc.querySelector('link[rel="canonical"]');
+                if (meta) {
+                    const url = meta.getAttribute('href');
+                    if (url && url.includes('github.com')) {
+                        const match = url.match(/https:\/\/github\.com\/[^\/]+\/[^\/]+/);
+                        if (match) return match[0];
+                    }
+                }
+                
+                // Try to extract from any GitHub URL in the page
+                const htmlStr = htmlContent;
+                const match = htmlStr.match(/https:\/\/github\.com\/[^\/]+\/[^\/]+/);
+                if (match) {
+                    return match[0];
+                }
+            } catch (e) {
+                console.error('Could not extract repo URL:', e);
+            }
+            return null;
+        }
+
+        // Convert relative links to absolute GitHub URLs
+        function fixLinks(doc, repoUrl) {
+            if (!repoUrl) return;
+            
+            const links = doc.querySelectorAll('a[href]');
+            links.forEach(link => {
+                let href = link.getAttribute('href');
+                
+                // Skip absolute URLs and anchors
+                if (href.startsWith('http') || href.startsWith('#') || href.startsWith('//')) {
+                    if (href.startsWith('http')) {
+                        link.setAttribute('target', '_blank');
+                        link.setAttribute('rel', 'noopener noreferrer');
+                    }
+                    return;
+                }
+                
+                // Strip leading ./ and /
+                let cleanPath = href.replace(/^\.\//, '').replace(/^\//, '');
+                
+                // Remove any repo name pattern (username/reponame/) from the path
+                cleanPath = cleanPath.replace(/^[^\/]+\/[^\/]+\//, '');
+                
+                // Remove /blob/main/ or /blob/any-branch/
+                cleanPath = cleanPath.replace(/^blob\/[^\/]+\//, '');
+                
+                if (cleanPath) {
+                    const newUrl = `${repoUrl}/blob/main/${cleanPath}`;
+                    link.setAttribute('href', newUrl);
+                    link.setAttribute('target', '_blank');
+                    link.setAttribute('rel', 'noopener noreferrer');
+                }
+            });
+        }
+
         // Update preview
         let updateTimeout;
         let cachedDoc = null;
         let htmlLoaded = false;
+        let cachedRepoUrl = null;
 
         function updatePreview() {
             // Debounce: clear previous timeout and set new one
@@ -772,6 +846,9 @@
                 const htmlChanged = !cachedDoc || !cachedDoc._originalHtml || cachedDoc._originalHtml !== htmlContent;
 
                 if (htmlChanged) {
+                    // Extract repo URL and cache it
+                    cachedRepoUrl = extractRepoUrl(htmlContent);
+                    
                     // Parse HTML and write entire document to iframe
                     const parser = new DOMParser();
                     cachedDoc = parser.parseFromString(htmlContent, 'text/html');
@@ -785,6 +862,9 @@
                         htmlLoaded = false;
                         return;
                     }
+
+                    // Fix all links to work with GitHub repo
+                    fixLinks(cachedDoc, cachedRepoUrl);
 
                     // Write full document to iframe
                     const html = cachedDoc.documentElement.outerHTML;
