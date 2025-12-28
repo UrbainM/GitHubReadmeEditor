@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Repo README Previewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js"></script>
+    <style>
+        :root {
+            --bg-primary: #f6f8fa;
+            --bg-secondary: white;
+            --text-primary: #24292e;
+            --text-secondary: #586069;
+            --border-color: #e1e4e8;
+            --border-light: #d1d5da;
+            --link-color: #0366d6;
+            --button-hover: #f6f8fa;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+
+        #preview {
+            width: 100vw;
+            height: 100vh;
+            border: none;
+            display: block;
+        }
+
+        /* Floating panels */
+        .floating-panel {
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            resize: both;
+            overflow: hidden;
+        }
+
+        .floating-panel.dragging {
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .panel-titlebar {
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            cursor: move;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            user-select: none;
+        }
+
+        .panel-title {
+            flex: 1;
+        }
+
+        .panel-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 16px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .panel-close:hover {
+            color: var(--text-primary);
+        }
+
+        .restore-panels {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 999;
+        }
+
+        .restore-btn {
+            padding: 8px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-light);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            transition: all 0.2s;
+        }
+
+        .restore-btn:hover {
+            background: var(--button-hover);
+            border-color: var(--link-color);
+        }
+
+        #htmlPanel {
+            left: 20px;
+            top: 20px;
+            width: 500px;
+            height: 350px;
+        }
+
+        #mdPanel {
+            left: 20px;
+            top: 390px;
+            width: 500px;
+            height: 350px;
+        }
+
+        .input-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .section-content {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .textarea {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            resize: none;
+            outline: none;
+            overflow-y: auto;
+        }
+
+        .button-group {
+            padding: 8px;
+            background: white;
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            border-top: 1px solid #e1e4e8;
+        }
+
+        button {
+            padding: 4px 8px;
+            border: 1px solid var(--border-light);
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-primary);
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: var(--button-hover);
+            border-color: var(--link-color);
+        }
+
+        button:active {
+            background: var(--border-light);
+            border-color: var(--link-color);
+        }
+
+        #htmlFile, #mdFile {
+            display: none;
+        }
+
+        /* GitHub-style markdown */
+        .markdown-body {
+            word-wrap: break-word;
+            color: var(--text-primary);
+        }
+
+        .markdown-body h1,
+        .markdown-body h2 {
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.3em;
+            margin-bottom: 16px;
+            margin-top: 24px;
+        }
+
+        .markdown-body h1 {
+            font-size: 32px;
+            font-weight: 600;
+            margin-top: 0;
+        }
+
+        .markdown-body h2 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .markdown-body h3 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body h4,
+        .markdown-body h5,
+        .markdown-body h6 {
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body h4 {
+            font-size: 16px;
+        }
+
+        .markdown-body h5 {
+            font-size: 14px;
+        }
+
+        .markdown-body h6 {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .markdown-body p {
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+
+        .markdown-body ul,
+        .markdown-body ol {
+            padding-left: 2em;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body li {
+            margin-bottom: 4px;
+        }
+
+        .markdown-body blockquote {
+            padding: 0 1em;
+            color: var(--text-secondary);
+            border-left: 0.25em solid var(--border-color);
+            margin: 0 0 16px 0;
+        }
+
+        .markdown-body code {
+            padding: 0.2em 0.4em;
+            margin: 0;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 85%;
+            color: var(--text-primary);
+        }
+
+        .markdown-body pre {
+            padding: 16px;
+            overflow: auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 16px;
+            line-height: 1.45;
+        }
+
+        .markdown-body pre code {
+            display: inline;
+            padding: 0;
+            margin: 0;
+            overflow: visible;
+            line-height: inherit;
+            background: transparent;
+            color: var(--text-primary);
+        }
+
+        .markdown-body a {
+            color: var(--link-color);
+            text-decoration: none;
+        }
+
+        .markdown-body a:hover {
+            text-decoration: underline;
+        }
+
+        .markdown-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body table tr {
+            border-top: 1px solid var(--border-color);
+        }
+
+        .markdown-body table tr:nth-child(2n) {
+            background-color: var(--bg-primary);
+        }
+
+        .markdown-body table th,
+        .markdown-body table td {
+            padding: 6px 13px;
+            border: 1px solid var(--border-color);
+        }
+
+        .markdown-body hr {
+            border: 0;
+            height: 2px;
+            background: var(--border-color);
+            margin: 24px 0;
+        }
+
+        .markdown-body a:hover {
+            text-decoration: underline;
+        }
+
+        .markdown-body img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .markdown-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body table tr {
+            background: white;
+            border-top: 1px solid #dfe2e5;
+        }
+
+        .markdown-body table tr:nth-child(2n) {
+            background: #f6f8fa;
+        }
+
+        .markdown-body table th,
+        .markdown-body table td {
+            padding: 6px 13px;
+            border: 1px solid #dfe2e5;
+        }
+
+        .markdown-body table th {
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <!-- Floating HTML Panel -->
+    <div class="floating-panel" id="htmlPanel">
+        <div class="panel-titlebar">
+            <div class="panel-title">📄 Repository HTML</div>
+            <button class="panel-close" onclick="togglePanel('htmlPanel')">−</button>
+        </div>
+        <div class="section-content">
+            <textarea id="htmlEditor" class="textarea" placeholder="Download your repo page as 'Webpage, HTML Only', then upload or drag the page here..."></textarea>
+        </div>
+        <div class="button-group">
+            <button onclick="loadTemplate()">📋 Template</button>
+            <button onclick="loadHtmlFile()">📂 Upload</button>
+            <button onclick="clearAll()" style="margin-left: auto;">🗑️ Clear HTML</button>
+        </div>
+    </div>
+
+    <!-- Floating Markdown Panel -->
+    <div class="floating-panel" id="mdPanel">
+        <div class="panel-titlebar">
+            <div class="panel-title">✏️ README Markdown</div>
+            <button class="panel-close" onclick="togglePanel('mdPanel')">−</button>
+        </div>
+        <div class="section-content">
+            <textarea id="mdEditor" class="textarea" placeholder="Paste README.md content..."></textarea>
+        </div>
+        <div class="button-group">
+            <button onclick="loadMdFile()">📂 Upload</button>
+            <button onclick="clearMarkdown()">🗑️ Clear</button>
+            <button onclick="downloadResult()">⬇️ Download</button>
+        </div>
+    </div>
+
+    <!-- Full-screen Preview iframe -->
+    <iframe id="preview" title="Live Preview"></iframe>
+
+    <input type="file" id="htmlFile" accept=".html">
+    <input type="file" id="mdFile" accept=".md,.txt,.markdown">
+
+    <!-- Panel restoration buttons -->
+    <div class="restore-panels" id="restorePanels" style="display: none;">
+        <button class="restore-btn" onclick="showPanel('htmlPanel')">📄 Show HTML</button>
+        <button class="restore-btn" onclick="showPanel('mdPanel')">✏️ Show Markdown</button>
+    </div>
+
+    <script>
+        const htmlEditor = document.getElementById('htmlEditor');
+        const mdEditor = document.getElementById('mdEditor');
+        const preview = document.getElementById('preview');
+        const htmlFile = document.getElementById('htmlFile');
+        const mdFile = document.getElementById('mdFile');
+
+        let draggedPanel = null;
+        let dragOffset = { x: 0, y: 0 };
+
+        // Configure marked
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+        });
+
+        // Load from GitHub
+        // Make panels draggable
+        document.querySelectorAll('.floating-panel').forEach(panel => {
+            const titlebar = panel.querySelector('.panel-titlebar');
+            titlebar.addEventListener('mousedown', (e) => {
+                draggedPanel = panel;
+                dragOffset.x = e.clientX - panel.offsetLeft;
+                dragOffset.y = e.clientY - panel.offsetTop;
+                panel.classList.add('dragging');
+                document.addEventListener('mousemove', dragPanel);
+                document.addEventListener('mouseup', stopDrag);
+            });
+        });
+
+        function dragPanel(e) {
+            if (!draggedPanel) return;
+            draggedPanel.style.left = (e.clientX - dragOffset.x) + 'px';
+            draggedPanel.style.top = (e.clientY - dragOffset.y) + 'px';
+        }
+
+        function stopDrag() {
+            if (draggedPanel) {
+                draggedPanel.classList.remove('dragging');
+                draggedPanel = null;
+            }
+            document.removeEventListener('mousemove', dragPanel);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+
+        function togglePanel(panelId) {
+            const panel = document.getElementById(panelId);
+            panel.style.display = 'none';
+            updateRestorePanels();
+        }
+
+        function showPanel(panelId) {
+            const panel = document.getElementById(panelId);
+            panel.style.display = 'flex';
+            updateRestorePanels();
+        }
+
+        function updateRestorePanels() {
+            const htmlPanel = document.getElementById('htmlPanel');
+            const mdPanel = document.getElementById('mdPanel');
+            const restorePanels = document.getElementById('restorePanels');
+            const htmlHidden = htmlPanel.style.display === 'none';
+            const mdHidden = mdPanel.style.display === 'none';
+            restorePanels.style.display = (htmlHidden || mdHidden) ? 'flex' : 'none';
+        }
+
+        // Load template
+        // Note on CORS: Direct GitHub page loading is blocked by CORS policies.
+        // Workarounds include:
+        // 1. Use GitHub API instead (limited to markdown/readme.md)
+        // 2. Browser extension that bypasses CORS
+        // 3. Save GitHub HTML locally and upload it here
+        // 4. Use a CORS proxy (unreliable and slow)
+        // For now, we embed the template here and users upload their own HTML.
+        
+        function loadTemplate() {
+            const templateHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Repository Name</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: #f6f8fa;
+            color: #24292e;
+        }
+
+        .container {
+            max-width: 1012px;
+            margin: 0 auto;
+            background: white;
+            min-height: 100vh;
+        }
+
+        .header {
+            padding: 24px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+
+        .repo-name {
+            font-size: 32px;
+            font-weight: 600;
+            margin: 0 0 8px 0;
+        }
+
+        .repo-description {
+            color: #6a737d;
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 24px;
+            border-bottom: 1px solid #e1e4e8;
+            padding: 0 24px;
+        }
+
+        .nav-tab {
+            color: #24292e;
+            text-decoration: none;
+            border-bottom: 3px solid transparent;
+            padding: 16px 0;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .nav-tab.active {
+            border-bottom-color: #f85149;
+            color: #24292e;
+        }
+
+        .readme-section {
+            padding: 24px;
+        }
+
+        .readme-header {
+            margin-bottom: 16px;
+        }
+
+        .readme-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        article.markdown-body {
+            word-wrap: break-word;
+        }
+
+        .markdown-body h1,
+        .markdown-body h2 {
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+            margin-bottom: 16px;
+            margin-top: 24px;
+        }
+
+        .markdown-body h1 {
+            font-size: 32px;
+            font-weight: 600;
+            margin-top: 0;
+        }
+
+        .markdown-body h2 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .markdown-body h3 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body h4,
+        .markdown-body h5,
+        .markdown-body h6 {
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body h4 {
+            font-size: 16px;
+        }
+
+        .markdown-body h5 {
+            font-size: 14px;
+        }
+
+        .markdown-body h6 {
+            font-size: 12px;
+            color: #6a737d;
+        }
+
+        .markdown-body p {
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+
+        .markdown-body ul,
+        .markdown-body ol {
+            padding-left: 2em;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body li {
+            margin-bottom: 4px;
+        }
+
+        .markdown-body blockquote {
+            padding: 0 1em;
+            color: #6a737d;
+            border-left: 0.25em solid #dfe2e5;
+            margin: 0 0 16px 0;
+        }
+
+        .markdown-body code {
+            padding: 0.2em 0.4em;
+            margin: 0;
+            background: rgba(27, 31, 35, 0.05);
+            border-radius: 3px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 85%;
+        }
+
+        .markdown-body pre {
+            padding: 16px;
+            overflow: auto;
+            background: #f6f8fa;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            line-height: 1.45;
+        }
+
+        .markdown-body pre code {
+            display: inline;
+            padding: 0;
+            margin: 0;
+            overflow: visible;
+            line-height: inherit;
+            background: transparent;
+        }
+
+        .markdown-body a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+
+        .markdown-body a:hover {
+            text-decoration: underline;
+        }
+
+        .markdown-body img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .markdown-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body table tr {
+            background: white;
+            border-top: 1px solid #dfe2e5;
+        }
+
+        .markdown-body table tr:nth-child(2n) {
+            background: #f6f8fa;
+        }
+
+        .markdown-body table th,
+        .markdown-body table td {
+            padding: 6px 13px;
+            border: 1px solid #dfe2e5;
+        }
+
+        .markdown-body table th {
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="repo-name">repository-name</h1>
+            <p class="repo-description">Add your repository description here</p>
+        </div>
+
+        <div class="nav-tabs">
+            <div class="nav-tab active">Code</div>
+            <div class="nav-tab">Issues</div>
+            <div class="nav-tab">Pull requests</div>
+            <div class="nav-tab">Wiki</div>
+        </div>
+
+        <div class="readme-section">
+            <div class="readme-header">
+                <h2 class="readme-title">README.md</h2>
+            </div>
+            <article class="markdown-body">
+                <p><em>Your README content will appear here</em></p>
+            </article>
+        </div>
+    </div>
+</body>
+</html>`;
+            
+            htmlEditor.value = templateHtml;
+            localStorage.setItem('repoHtml', templateHtml);
+            updatePreview();
+        }
+
+        // Update preview
+        let updateTimeout;
+        let cachedDoc = null;
+        let htmlLoaded = false;
+
+        function updatePreview() {
+            // Debounce: clear previous timeout and set new one
+            clearTimeout(updateTimeout);
+            updateTimeout = setTimeout(() => {
+                updatePreviewNow();
+            }, 300);
+        }
+
+        function updatePreviewNow() {
+            const htmlContent = htmlEditor.value;
+            const markdown = mdEditor.value;
+
+            if (!htmlContent.trim()) {
+                showEmptyState('Paste repository HTML');
+                cachedDoc = null;
+                htmlLoaded = false;
+                return;
+            }
+
+            try {
+                // Check if HTML changed
+                const htmlChanged = !cachedDoc || !cachedDoc._originalHtml || cachedDoc._originalHtml !== htmlContent;
+
+                if (htmlChanged) {
+                    // Parse HTML and write entire document to iframe
+                    const parser = new DOMParser();
+                    cachedDoc = parser.parseFromString(htmlContent, 'text/html');
+                    cachedDoc._originalHtml = htmlContent;
+
+                    // Check markdown-body exists before writing
+                    const articles = cachedDoc.querySelectorAll('article.markdown-body');
+                    if (articles.length === 0) {
+                        showEmptyState('Could not find markdown-body element. Check your HTML.');
+                        cachedDoc = null;
+                        htmlLoaded = false;
+                        return;
+                    }
+
+                    // Write full document to iframe
+                    const html = cachedDoc.documentElement.outerHTML;
+                    const iframeDoc = preview.contentDocument || preview.contentWindow.document;
+                    iframeDoc.open();
+                    iframeDoc.write(html);
+                    iframeDoc.close();
+                    htmlLoaded = true;
+                }
+
+                // Update only markdown content in iframe (no page refresh)
+                if (htmlLoaded) {
+                    const iframeDoc = preview.contentDocument || preview.contentWindow.document;
+                    const iframeArticle = iframeDoc.querySelector('article.markdown-body');
+                    
+                    if (iframeArticle) {
+                        // Render markdown to HTML
+                        const renderedMarkdown = markdown ? marked.parse(markdown) : '<p><em>No README content</em></p>';
+                        const cleanHtml = DOMPurify.sanitize(renderedMarkdown);
+                        
+                        // Directly update only the markdown content
+                        iframeArticle.innerHTML = cleanHtml;
+                    }
+                }
+
+                // Save to localStorage
+                localStorage.setItem('repoHtml', htmlEditor.value);
+                localStorage.setItem('readmeMarkdown', mdEditor.value);
+
+            } catch (e) {
+                showEmptyState(`Error: ${e.message}`);
+            }
+        }
+
+        function showEmptyState(message) {
+            try {
+                const iframeDoc = preview.contentDocument || preview.contentWindow.document;
+                iframeDoc.open();
+                iframeDoc.write(`
+                    <html>
+                    <head><style>
+                        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; 
+                               display: flex; align-items: center; justify-content: center; 
+                               height: 100vh; margin: 0; background: #f6f8fa; }
+                        .message { text-align: center; color: #6a737d; font-size: 16px; }
+                    </style></head>
+                    <body><div class="message">${message}</div></body>
+                    </html>
+                `);
+                iframeDoc.close();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // Event listeners
+        htmlEditor.addEventListener('input', () => {
+            updatePreview();
+        });
+
+        mdEditor.addEventListener('input', () => {
+            updatePreview();
+            localStorage.setItem('readmeMarkdown', mdEditor.value);
+        });
+
+        // File loading
+        function loadHtmlFile() {
+            htmlFile.click();
+        }
+
+        function loadMdFile() {
+            mdFile.click();
+        }
+
+        // Extract markdown from HTML markdown-body element
+        function extractMarkdownFromHtml(htmlContent) {
+            try {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlContent, 'text/html');
+                const article = doc.querySelector('article.markdown-body');
+                
+                if (article) {
+                    // Use turndown to convert HTML to markdown
+                    const turndownService = new TurndownService();
+                    return turndownService.turndown(article);
+                }
+            } catch (e) {
+                console.error('Could not extract markdown:', e);
+            }
+            return null;
+        }
+
+        htmlFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                htmlEditor.value = event.target.result;
+                // Auto-extract markdown from HTML
+                const extracted = extractMarkdownFromHtml(event.target.result);
+                if (extracted) {
+                    mdEditor.value = extracted;
+                }
+                updatePreview();
+                localStorage.setItem('repoHtml', htmlEditor.value);
+                localStorage.setItem('readmeMarkdown', mdEditor.value);
+            };
+            reader.readAsText(file);
+            htmlFile.value = '';
+        });
+
+        mdFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                mdEditor.value = event.target.result;
+                updatePreview();
+                localStorage.setItem('readmeMarkdown', mdEditor.value);
+            };
+            reader.readAsText(file);
+            mdFile.value = '';
+        });
+
+        // Drag-drop support for HTML panel
+        const htmlPanel = document.getElementById('htmlPanel');
+        htmlPanel.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            htmlPanel.style.opacity = '0.7';
+            htmlPanel.style.borderColor = '#0366d6';
+        });
+
+        htmlPanel.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            htmlPanel.style.opacity = '1';
+            htmlPanel.style.borderColor = '';
+        });
+
+        htmlPanel.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            htmlPanel.style.opacity = '1';
+            htmlPanel.style.borderColor = '';
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type === 'text/html' || file.name.endsWith('.html')) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        htmlEditor.value = event.target.result;
+                        // Auto-extract markdown from HTML
+                        const extracted = extractMarkdownFromHtml(event.target.result);
+                        if (extracted) {
+                            mdEditor.value = extracted;
+                        }
+                        updatePreview();
+                        localStorage.setItem('repoHtml', htmlEditor.value);
+                        localStorage.setItem('readmeMarkdown', mdEditor.value);
+                    };
+                    reader.readAsText(file);
+                } else {
+                    alert('Please drop an HTML file');
+                }
+            }
+        });
+
+        // Drag-drop support for Markdown panel
+        const mdPanel = document.getElementById('mdPanel');
+        mdPanel.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mdPanel.style.opacity = '0.7';
+            mdPanel.style.borderColor = '#0366d6';
+        });
+
+        mdPanel.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            mdPanel.style.opacity = '1';
+            mdPanel.style.borderColor = '';
+        });
+
+        mdPanel.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mdPanel.style.opacity = '1';
+            mdPanel.style.borderColor = '';
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type === 'text/markdown' || file.type === 'text/plain' || file.name.endsWith('.md') || file.name.endsWith('.txt')) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        mdEditor.value = event.target.result;
+                        updatePreview();
+                        localStorage.setItem('readmeMarkdown', mdEditor.value);
+                    };
+                    reader.readAsText(file);
+                } else {
+                    alert('Please drop a markdown or text file');
+                }
+            }
+        });
+
+        function clearMarkdown() {
+            if (mdEditor.value && !confirm('Clear README?')) return;
+            mdEditor.value = '';
+            updatePreview();
+            localStorage.removeItem('readmeMarkdown');
+        }
+
+        function clearAll() {
+            if (!confirm('Clear HTML content?')) return;
+            htmlEditor.value = '';
+            showEmptyState('📋 HTML cleared. Upload or paste new HTML to continue.');
+            localStorage.removeItem('repoHtml');
+        }
+
+        function downloadResult() {
+            const htmlContent = htmlEditor.value;
+            const markdown = mdEditor.value;
+
+            if (!htmlContent.trim()) {
+                alert('No repository HTML to download');
+                return;
+            }
+
+            try {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlContent, 'text/html');
+                const articles = doc.querySelectorAll('article.markdown-body');
+                
+                if (articles.length > 0) {
+                    const renderedMarkdown = markdown ? marked.parse(markdown) : '';
+                    const cleanHtml = DOMPurify.sanitize(renderedMarkdown);
+                    articles[0].innerHTML = cleanHtml;
+                    
+                    const html = doc.documentElement.outerHTML;
+                    const blob = new Blob([html], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'repository.html';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            } catch (e) {
+                alert('Error generating download');
+            }
+        }
+
+        // Load from localStorage on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedHtml = localStorage.getItem('repoHtml');
+            const savedMd = localStorage.getItem('readmeMarkdown');
+            
+            if (savedHtml) {
+                htmlEditor.value = savedHtml;
+            }
+            if (savedMd) {
+                mdEditor.value = savedMd;
+            }
+            
+            if (savedHtml || savedMd) {
+                updatePreview();
+            }
+        });
+    </script>
+</body>
+</html>
